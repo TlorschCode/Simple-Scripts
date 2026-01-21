@@ -2,15 +2,14 @@
 #include <filesystem>
 #include <string>
 
-namespace fs = std::filesystem;
 
-void printDirJSON(const fs::path& path, int depth, int maxDepth) {
+void printDirJSON(const std::filesystem::path& path, int depth, int maxDepth) {
     if (depth > maxDepth) return;
 
     std::cout << "{\n";
 
     bool firstEntry = true;
-    for (const auto& entry : fs::directory_iterator(path)) {
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
         if (!firstEntry) std::cout << ",\n";
         firstEntry = false;
 
@@ -18,7 +17,7 @@ void printDirJSON(const fs::path& path, int depth, int maxDepth) {
         std::cout << std::string((depth + 1) * 2, ' ') << "\"" 
                   << entry.path().filename().string() << "\": ";
 
-        if (fs::is_directory(entry.status())) {
+        if (std::filesystem::is_directory(entry.status())) {
             // Recurse into directory
             printDirJSON(entry.path(), depth + 1, maxDepth);
         } else {
@@ -36,10 +35,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    fs::path startPath = argv[1];
+    std::filesystem::path startPath = argv[1];
     int maxDepth = std::stoi(argv[2]);
 
-    if (!fs::exists(startPath) || !fs::is_directory(startPath)) {
+    if (!std::filesystem::exists(startPath) || !std::filesystem::is_directory(startPath)) {
         std::cerr << "Error: Path does not exist or is not a directory\n";
         return 1;
     }

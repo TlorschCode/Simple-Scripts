@@ -1,0 +1,5 @@
+/src/main.cpp
+./src/main.cpp
+./*.bat
+./*.exe
+*.cpp
