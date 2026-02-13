@@ -2,6 +2,5 @@
 ./src/main.cpp
 ./*.bat
 ./*.exe
-./b.bat
 *.cpp
-b.bat
+.vscode
