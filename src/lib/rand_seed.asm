@@ -49,6 +49,7 @@ section .bss
     align 16 ; align the followign values to memory locations divisible by 16 for faster access
     state0: RESQ 1
     state1: RESQ 1
+    seed: RESQ 1
 
 section .text
 extern _throw_runtime_error
@@ -113,62 +114,88 @@ gen_seed_biasless:
         ; this results in basically no bias (1 / (2^64) of bias, or ~0.00000000000000000005...)
         ret
 
-__randint:
-    CMP rcx,rdx
-    JA .call_bad_arg_order
-    JE randint__rangeless_so_ret_min
-    JMP randint__gen_num
-    .call_bad_arg_order:
-        call err__bad_arg_order
-        JMP end_func__randint
-    randint__rangeless_so_ret_min:
-        MOV rax,rcx
-        ret
+
+
+; VERIFIED
+splitmix64__uses_rax_rbx:
+    ; seed += 0x9E3779B97F4A7C15
+    ADD qword [seed],0x9E3779B97F4A7C15
+    MOV rax,[seed] ; z = seed. rax is persistently z
+
+
+    ; z = (z XOR (z >> 30)) * 0xBF58476D1CE4E5B9
+    MOV r11,rax ; r11 = z
+    SHR r11,30 ; (z >> 30)
+    XOR rax,r11 ; z XOR (z >> 30)
+    IMUL qword rax,0xBF58476D1CE4E5B9
+
+
+    ; z = (z XOR (z >> 27)) * 0x94D049BB133111EB
+    MOV r11,rax
+    SHR r11,27 ; (z >> 27)
+    XOR rax,r11 ; z XOR (z >> 27)
+    IMUL rax,0x94D049BB133111EB
     
-    randint__gen_num:
-        RDRAND rdx
-        MULX rbx,rax,rdx ; low 64 bits go into rbx, high 64 bits go into rax (since multiplying two 64 bit unsigned ints together could result in 128 bits needed of total storage)
-        ; this results in basically no bias (1 / (2^64) of bias, or ~0.00000000000000000005...)
-        ret
 
-; uint64_t randint(uint64_t* state0, uint64_t* state1) {
-;     uint64_t s0 = *state0;
-;     uint64_t s1 = *state1;
-
-;     uint64_t result = s0 + s1;       // output value
-
-;     s1 ^= s0;                         // xor the two states
-;   // ^^^ COMPLETE ^^^
-
-;     *state0 = rotl(s0, 55) ^ s1 ^ (s1 << 14);  // rotate and mix
-;     *state1 = rotl(s1, 36);           // rotate
-
-;     return result;
-; }
-randint:
-    MOV r13,[state0]
-    ADD r13,[state1]
-    MOV r14,[state0]
-    XOR r14,[state1]
-
-    ; state0 = rotl(s0, 55) ^ s1 ^ (s1 << 14)
-    MOV arg1,[state0]
-    MOV arg2,55
-    rot_left
-    MOV r15,rax
-    XOR r15,[state1]
-    MOV r10,[state1]
-    SHL r10,14
-    XOR r15,r10
-    MOV [state0],r15
-
-    ; *state1 = rotl(s1, 36);
-    MOV arg1,[state1]
-    MOV arg2,36
-    rot_left
-    MOV [state1],rax
-    MOV rax,r13
+    ; return z XOR (z >> 31)
+    MOV r11,rax
+    SHR r11,31  ; (z >> 31)
+    XOR rax,r11 ; z XOR (z >> 31)
     ret
+    ; FORMULA:
+    ;     seed += 0x9E3779B97F4A7C15
+    ;     z = seed
+    ;     z = (z XOR (z >> 30)) * 0xBF58476D1CE4E5B9
+    ;     z = (z XOR (z >> 27)) * 0x94D049BB133111EB
+    ;     return z XOR (z >> 31)
+
+
+
+
+randint:
+    
+
+; VERIFIED (99%)
+rand64:
+    MOV rax,[state0] ; use r12 because rax will be overwritten with rot_left
+    ADD rax,[state1] ; result = state0 + state1
+
+
+    MOV r11,[state0] ; cannot xor [state1] wih [state0] in one instruction
+    XOR [state1],r11 ; state1 ^= state0
+
+
+    ; state0 = rotl(state0, 55) ^ state1 ^ (state1 << 14)
+    MOV r11,[state1]
+    SHL r11,14 ; (state1 << 14)
+
+    ; rotleft
+    MOV r12,[state0] ; value to rotate
+    MOV cl,55       ; lower 8 bits of 55 (rotation count)
+    ROL r12,cl
+
+    XOR r12,[state1]
+    XOR r12,r10
+    MOV qword [state0],r12 ; state0 = ...
+
+
+    ; state1 = rotl(state1, 36)
+    MOV r12,[state1] ; value to rotate
+    MOV cl, 36      ; lower 8 bits of arg2 (rotation count)
+    ROL r12, cl
+
+    MOV [state1],r12
+    ret ; rax has stayed persistent and is still a valid return value
+    ; FORMULA:
+    ;     uint64_t result = state0 + state1;       // output value
+
+    ;     state1 ^= state0;                         // xor the two states
+
+    ;     state0 = rotl(state0, 55) ^ state1 ^ (state1 << 14);  // rotate and mix
+    ;     state1 = rotl(state1, 36);           // rotate
+
+    ;     return result;
+    ; }
 
 
 err__invalid_val_arg:

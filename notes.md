@@ -29,8 +29,8 @@
     <li>r11 – Caller-saved; used internally by the Windows syscall mechanism.</li>
     <li>r12 – Callee-saved general-purpose register.</li>
     <li>r13 – Callee-saved general-purpose register.</li>
-    <li>r14 – Callee-saved general-purpose register.</li>
-    <li>r15 – Callee-saved general-purpose register.</li>
+    <li>r14 – Callee-saved general-purpose register.<br>SELF STANDARD (for r14 and r15): volatile, should not be trusted to retain prior data after a function call.</li>
+    <li>r15 – Callee-saved general-purpose register. Volatile (temporary, see above).</li>
 </ol>
 
 <h2>For Linux</h2>
