@@ -45,19 +45,21 @@ section .data
     invalid_val_arg_msg: DB "Invalid Int",0
     invalid_inputs_msg: DB "Minimum cannot be greater than maximum",0
 
+
 section .bss
     align 16 ; align the followign values to memory locations divisible by 16 for faster access
     state0: RESQ 1
     state1: RESQ 1
-    seed: RESQ 1
+
 
 section .text
+
 extern _throw_runtime_error
 extern _throw_logic_error
-global gen_seed
 global randint
-global gen_seed_biasless
 global randint_biasless
+global gen_seed
+global gen_seed_biasless
 
 
 pow:
@@ -89,38 +91,75 @@ gen_seed:
         MOV rax,[arg1]
         ret
     seed__gen_num:
-        RDSEED rdx ; MULX uses rdx instead of rax
-        MULX rbx,rax,rdx ; low 64 bits go into rbx, high 64 bits go into rax (since multiplying two 64 bit unsigned ints together could result in 128 bits needed of total storage)
+        RDSEED rax ; MULX uses rdx instead of rax
+        MOV rdx,arg2 ; rbx = max
+        SUB rdx,arg1 ; rbx = max - min
+        MULX rax,rdx,rax ; low 64 bits go into rdx, high 64 bits go into rax (since multiplying two 64 bit unsigned ints together could result in 128 bits needed of total storage)
         ; this results in basically no bias (1 / (2^64) of bias, or ~0.00000000000000000005...)
-        ret
-        
-gen_seed_biasless:
-    CMP arg1,arg2
-    JA .call_bad_arg_order
-    JE bseed__rangeless_so_RET_min
-    JMP seed__check_bits
-    .call_bad_arg_order:
-        call err__bad_arg_order
-        JMP end_func__seed
-    bseed__no_range_so_ret_min:
-        MOV rax,[arg1]
-        ret
-    
-    
-    seed__gen_biasless16:
-        RDSEED rdx ; MULX uses rdx instead of rax
-        CMP
-        MULX rbx,rax,rdx ; low 64 bits go into rbx, high 64 bits go into rax (since multiplying two 64 bit unsigned ints together could result in 128 bits needed of total storage)
-        ; this results in basically no bias (1 / (2^64) of bias, or ~0.00000000000000000005...)
+        ADD rax,arg1 ; add min to shift into min max range
         ret
 
+
+gen_seed_biasless:
+    ; TODO: Create biasless seed generation
+    ; FORMULA:
+    ; uint64_t bounded_rand(uint64_t range) {
+    ;     uint64_t threshold = (uint64_t)(-range) % range; // precompute
+
+    ;     while (1) {
+    ;         uint64_t x = rng();           // 64-bit random
+    ;         unsigned __int128 prod = (unsigned __int128)x * range;
+    ;         uint64_t hi = prod >> 64;
+    ;         uint64_t lo = (uint64_t)prod; // low 64 bits
+    ;         if (lo >= threshold)
+    ;             return hi;                // result in [0, range)
+    ;         // else repeat
+    ;     }
+    ; }
+
+
+randint:
+    CALL gen_rand64
+    MOV rdx,arg2
+    SUB rdx,arg1
+    MULX rax,rdx,rax
+    ADD rax,arg1
+    ret
+
+
+randint_biasless:
+    ; TODO: Create biasless randint generation
+    ; FORMULA:
+    ; uint64_t bounded_rand(uint64_t range) {
+    ;     uint64_t threshold = (uint64_t)(-range) % range; // precompute
+
+    ;     while (1) {
+    ;         uint64_t x = rng();           // 64-bit random
+    ;         unsigned __int128 prod = (unsigned __int128)x * range;
+    ;         uint64_t hi = prod >> 64;
+    ;         uint64_t lo = (uint64_t)prod; // low 64 bits
+    ;         if (lo >= threshold)
+    ;             return hi;                // result in [0, range)
+    ;         // else repeat
+    ;     }
+    ; }
 
 
 ; VERIFIED
-splitmix64__uses_rax_rbx:
+seed_states:
+    CALL gen_seed
+    MOV [state0],rax ; populate state0
+    MOV arg1,rax
+    CALL splitmix64
+    MOV [state1],rax ; populate state1
+    ret
+
+
+; VERIFIED
+splitmix64:
     ; seed += 0x9E3779B97F4A7C15
-    ADD qword [seed],0x9E3779B97F4A7C15
-    MOV rax,[seed] ; z = seed. rax is persistently z
+    ADD arg1,0x9E3779B97F4A7C15
+    MOV rax,arg1 ; z = seed. rax is persistently z
 
 
     ; z = (z XOR (z >> 30)) * 0xBF58476D1CE4E5B9
@@ -150,13 +189,8 @@ splitmix64__uses_rax_rbx:
     ;     return z XOR (z >> 31)
 
 
-
-
-randint:
-    
-
 ; VERIFIED (99%)
-rand64:
+gen_rand64:
     MOV rax,[state0] ; use r12 because rax will be overwritten with rot_left
     ADD rax,[state1] ; result = state0 + state1
 
@@ -196,6 +230,7 @@ rand64:
 
     ;     return result;
     ; }
+
 
 
 err__invalid_val_arg:
