@@ -14,7 +14,7 @@
 
 <b>All registers</b>:
 
-<ol>
+<ul>
     <li>rax – Return value register; also used for temporary value</li>
     <li>rbx – Callee-saved general-purpose register.</li>
     <li>rcx – 1st argument register; also used as a loop counter.</li>
@@ -29,10 +29,19 @@
     <li>r11 – Caller-saved; used internally by the Windows syscall mechanism.</li>
     <li>r12 – Callee-saved general-purpose register.</li>
     <li>r13 – Callee-saved general-purpose register.</li>
-    <li>r14 – Callee-saved general-purpose register.<br>SELF STANDARD (for r14 and r15): volatile, should not be trusted to retain prior data after a function call.</li>
-    <li>r15 – Callee-saved general-purpose register. Volatile (temporary, see above).</li>
-</ol>
-
+    <li>r14 – Callee-saved general-purpose register.</li>
+    <li>r15 – Callee-saved general-purpose register.</li>
+</ul>
+<p><b>Volatile registers</b>:</p>
+<ul>
+    <li>rax</li>
+    <li>rcx</li>
+    <li>rdx</li>
+    <li>r8</li>
+    <li>r9</li>
+    <li>r10</li>
+    <li>r11</li>
+</ul>
 <h2>For Linux</h2>
 
 <b>Register call order</b> (order that you recieve values from functions):
@@ -50,7 +59,7 @@
 
 <b>All registers</b>:
 
-<ol>
+<ul>
     <li>rax – Return value register; also used for syscall numbers and temporary values.</li>
     <li>rbx – Callee-saved general-purpose register; often used to hold persistent values across function calls.</li>
     <li>rcx – 4th argument register; also used as a counter in loops and shift/rotate instructions.</li>
@@ -67,4 +76,4 @@
     <li>r13 – Callee-saved general-purpose register.</li>
     <li>r14 – Callee-saved general-purpose register.</li>
     <li>r15 – Callee-saved general-purpose register.</li>
-</ol>
+</ul>

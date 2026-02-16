@@ -1,15 +1,10 @@
-; nasm -f elf64 rand_seed.asm -o rand_seed.o
-; ld rand_seed.o -o rand_seed
-; ./rand_seed
-
-%include "src/lib/bit_size_enums.inc"
-
 %define arg1 rcx
 %define arg2 rdx
 %define arg3 r8
 %define arg4 r9
 %define arg5 r10
 %define arg6 r11
+%define qw qword 
 
 %macro store_args 1-6
     %if %0 >= 1
@@ -32,62 +27,29 @@
     %endif
 %endmacro
 
-; macro for speed (no function skipping around on the stack)
-%macro rot_left 0
-    MOV rax, arg1    ; value to rotate
-    MOV cl, arg2b    ; lower 8 bits of arg2 (rotation count)
-    ROL rax, cl
-    ret
-%endmacro
-
 
 section .data
     invalid_val_arg_msg: DB "Invalid Int",0
     invalid_inputs_msg: DB "Minimum cannot be greater than maximum",0
 
 
-section .bss
-    align 16 ; align the followign values to memory locations divisible by 16 for faster access
-    state0: RESQ 1
-    state1: RESQ 1
-
-
 section .text
 
-extern _throw_runtime_error
 extern _throw_logic_error
-global randint
-global randint_biasless
+extern state0
+extern state1
+
+
 global gen_seed
-global gen_seed_biasless
-
-
-pow:
-    TEST arg2,0 ; performs and op on the values, but only modifies flags
-    JZ pow_base_case
-    MOV rbx,arg2
-    pow_loop:
-        TEST rbx,0
-        JZ end_pow
-        MUL arg1,arg1
-        DEC rbx
-        JMP pow_loop
-    pow_base_case:
-        MOV rax,1
-        ret
-    end_pow:
-        ret
-    
-
 gen_seed:
     CMP arg1,arg2
     JA .call_bad_arg_order
-    JE seed__rangeless_so_ret_min
+    JE .seed__rangeless_so_ret_min
     JMP seed__gen_num
     .call_bad_arg_order:
         call err__bad_arg_order
-        JMP end_func__seed
-    seed__rangeless_so_ret_min:
+        ret
+    .seed__rangeless_so_ret_min:
         MOV rax,[arg1]
         ret
     seed__gen_num:
@@ -100,11 +62,30 @@ gen_seed:
         ret
 
 
+global gen_seed_biasless
 gen_seed_biasless:
-    ; TODO: Create biasless seed generation
+    CMP arg1,arg2
+    JA .call_bad_arg_order
+    JE .seed__rangeless_so_ret_min
+    JMP seed_biasless__gen_num
+    .call_bad_arg_order:
+        call err__bad_arg_order
+        ret
+    .seed__rangeless_so_ret_min:
+        MOV rax,[arg1]
+        ret
+    seed_biasless__gen_num:
+        ; range = max - min + 1;
+        ADD arg1,1
+        SUB arg2,arg1 ; rdx now holds range
+        XOR rax,rax ; clear rax
+
+        ; threshold = (pow(2, 64)) % range
+        RDSEED r10
+
     ; FORMULA:
     ; uint64_t bounded_rand(uint64_t range) {
-    ;     uint64_t threshold = (uint64_t)(-range) % range; // precompute
+    ;     uint64_t threshold = (pow(2, 64)) % range; // precompute
 
     ;     while (1) {
     ;         uint64_t x = rng();           // 64-bit random
@@ -118,16 +99,26 @@ gen_seed_biasless:
     ; }
 
 
-randint:
+global u_randint
+u_randint:
     CALL gen_rand64
-    MOV rdx,arg2
-    SUB rdx,arg1
-    MULX rax,rdx,rax
+    SUB arg2,arg1
+    MULX rax,arg2,rax
+    ADD rax,arg1
+    ret
+
+global randint:
+    CALL gen_rand64
+    SUB arg2,arg1
+    ADD arg2,1  ; for unsigned purposes
+    MULX rax,arg2,rax
     ADD rax,arg1
     ret
 
 
+global randint_biasless
 randint_biasless:
+
     ; TODO: Create biasless randint generation
     ; FORMULA:
     ; uint64_t bounded_rand(uint64_t range) {
@@ -146,19 +137,19 @@ randint_biasless:
 
 
 ; VERIFIED
+global seed_states
 seed_states:
     CALL gen_seed
-    MOV [state0],rax ; populate state0
+    MOV qword [state0],rax ; populate state0
     MOV arg1,rax
     CALL splitmix64
-    MOV [state1],rax ; populate state1
+    MOV qword [state1],rax ; populate state1
     ret
 
 
 ; VERIFIED
 splitmix64:
-    ; seed += 0x9E3779B97F4A7C15
-    ADD arg1,0x9E3779B97F4A7C15
+    ADD arg1,0x9E3779B97F4A7C15 ; seed += 0x9E3779B97F4A7C15
     MOV rax,arg1 ; z = seed. rax is persistently z
 
 
@@ -166,7 +157,7 @@ splitmix64:
     MOV r11,rax ; r11 = z
     SHR r11,30 ; (z >> 30)
     XOR rax,r11 ; z XOR (z >> 30)
-    IMUL qword rax,0xBF58476D1CE4E5B9
+    IMUL rax,0xBF58476D1CE4E5B9
 
 
     ; z = (z XOR (z >> 27)) * 0x94D049BB133111EB
@@ -190,35 +181,34 @@ splitmix64:
 
 
 ; VERIFIED (99%)
+global gen_rand64
 gen_rand64:
-    MOV rax,[state0] ; use r12 because rax will be overwritten with rot_left
-    ADD rax,[state1] ; result = state0 + state1
+    MOV rax, qword [state0]
+    ADD rax, qword [state1] ; result = state0 + state1
 
 
-    MOV r11,[state0] ; cannot xor [state1] wih [state0] in one instruction
-    XOR [state1],r11 ; state1 ^= state0
+    MOV r10, qword [state0] ; cannot xor [state1] wih [state0] in one instruction
+    XOR qword [state1],r10 ; state1 ^= state0
 
 
     ; state0 = rotl(state0, 55) ^ state1 ^ (state1 << 14)
-    MOV r11,[state1]
-    SHL r11,14 ; (state1 << 14)
+    MOV r10, qword [state1]
+    SHL r10,14 ; (state1 << 14)
 
     ; rotleft
-    MOV r12,[state0] ; value to rotate
-    MOV cl,55       ; lower 8 bits of 55 (rotation count)
-    ROL r12,cl
+    MOV r11, qword [state0] ; value to rotate
+    ROL r11,55 ; rotl(state0, 55)
 
-    XOR r12,[state1]
-    XOR r12,r10
-    MOV qword [state0],r12 ; state0 = ...
+    XOR r11, qword [state1] ;  rotl(state0, 55) ^ state1
+    XOR r11,r10      ; (rotl(state0, 55) ^ state1) ^ (state1 << 14)
+    MOV qword [state0],r11 ; state0 = ...
 
 
     ; state1 = rotl(state1, 36)
-    MOV r12,[state1] ; value to rotate
-    MOV cl, 36      ; lower 8 bits of arg2 (rotation count)
-    ROL r12, cl
+    MOV r11, qword [state1] ; value to rotate
+    ROL r11, 36
 
-    MOV [state1],r12
+    MOV qword [state1],r11
     ret ; rax has stayed persistent and is still a valid return value
     ; FORMULA:
     ;     uint64_t result = state0 + state1;       // output value
@@ -231,12 +221,6 @@ gen_rand64:
     ;     return result;
     ; }
 
-
-
-err__invalid_val_arg:
-    LEA rax,[invalid_val_arg_msg] ; loads the address of the first value in the char array into rax
-    call _throw_runtime_error
-    ret
 
 err__bad_arg_order:
     LEA rax,[invalid_inputs_msg]
