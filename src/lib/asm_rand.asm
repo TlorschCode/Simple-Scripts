@@ -38,8 +38,8 @@ extern _throw_logic_error
 
 
 
-global asm_gen_seed
-asm_gen_seed:
+global gen_seed
+gen_seed:
     CMP arg1,arg2
     JA .call_bad_arg_order
     JE .ret_min
@@ -62,16 +62,16 @@ asm_gen_seed:
         MOV rax,[arg1]
         ret
 
-global asm_gen_seed64
-asm_gen_seed64:
+global gen_seed64
+gen_seed64:
     seed64__try_seed:
         RDSEED rax
         JNC seed64__try_seed ; carry flag is clear, so it did not succeed
     ret
 
 
-global asm_gen_seed_biasless
-asm_gen_seed_biasless:
+global gen_seed_biasless
+gen_seed_biasless:
     CMP arg1,arg2
     JA .call_bad_arg_order
     JE .ret_min
@@ -82,7 +82,11 @@ asm_gen_seed_biasless:
     ; range = max - min + 1;
     ADD arg1,1
     SUB arg2,arg1 ; rdx now holds range
+    MOV r15,arg2
     XOR rax,rax ; clear rax
+    MOV rdx,1 ; higher half of rax, now rax is 2^64 or something
+    DIV r15
+
 
     ; threshold = (pow(2, 64)) % range
     
@@ -111,8 +115,8 @@ asm_gen_seed_biasless:
         ret
 
 
-global asm_randint
-asm_randint: ; arg1 is RNGstate, arg2 is min, arg3 is max
+global gen_randint
+gen_randint: ; arg1 is RNGstate, arg2 is min, arg3 is max
     CMP arg2,arg3
     JA .call_bad_arg_order
 
