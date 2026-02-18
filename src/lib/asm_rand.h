@@ -13,29 +13,47 @@ struct RNGstate {
 extern "C" {
 #endif
 
-// functions defined in asm
+//? functions defined in asm
 
-// Generates a completely biasless truly random number using the `RDSEED` assembly instruction.
-// Ensures biaslessness using Lemire's rejection sampling method.
-//
-// This function's somewhat faster alternative `gen_seed()` introduces a slight bias to numbers (1 / 2^64, meaning some numbers are ~0.00000000000000000005% more likely to be generated).
-//
-// It is reccomended to only use this to seed an RNG, since it is ~500x slower than `gen_randint`/`gen_randint_biasless` (which are pseudoRNG's).
-uint64_t gen_seed_biasless(uint64_t min, uint64_t max);
 
-// Generates a truly random number using the `RDSEED` assembly instruction.
+
+//|MARK: Gen Normal
+
+// Generates a biasless, truly random number using the `RDSEED` assembly instruction.
 //
-// This function is faster than `gen_seed_biasless`, but introduces a slight bias to the randomness.
-// Some numbers are 1 / 2^64 times more likely to appear (~0.00000000000000000005% more likely to appear).
+// It is recommended to use this to seed an RNG rather than act as a standalone one, since it is ~500x slower than `gen_randint`/`gen_randint_fast` (which are pseudoRNG's).
 uint64_t gen_seed(uint64_t min, uint64_t max);
 
-// Generates a completely biasless truly random number from 0 to 2^64 using assembly's `RDSEED` instruction.
+// Generates a high-quality, biasless, pseudorandom number from `min` to `max` (inclusive).
+// Uses `xoroshiro++`, a general purpose pseudoRNG algorithm.
+uint64_t gen_urandint(RNGstate& state, uint64_t min, uint64_t max);
+
+// Generates a high-quality, biasless, pseudorandom number from `min` to `max` (inclusive).
+// Uses `xoroshiro**`, which is higher quality than `gen_randint`'s `xoroshiro++`.
+// Is ~15% slower than `gen_randint`.
+uint64_t gen_urandintHQ(RNGstate& state, uint64_t min, uint64_t max);
+
+
+
+//|MARK: Gen 64
+
+// Generates a biasless, truly random number from 0 to 2^64 (inclusive) using assembly's `RDSEED` instruction.
 uint64_t gen_seed64();
 
-// Generates a high-quality pseudorandom number using 
-uint64_t gen_randint(RNGstate& state, uint64_t min, uint64_t max);
-uint64_t gen_randint_biasless(RNGstate& state, uint64_t min, uint64_t max);
+// Generates a high-quality, biasless random number from 0 to 2^64 (inclusive).
+// Uses a `xoroshiro++`, a general-purpose pseudoRNG.
 uint64_t gen_rand64(RNGstate& state);
+
+// Generates a high-quality, biasless random number from 0 to 2^64 (inclusive).
+// Uses a higher-quality pseudoRNG (`xoroshiro**`) than `gen_rand64`, which uses `xoroshiro++`.
+// Is ~15% slower than `gen_rand64`.
+uint64_t gen_rand64HQ(RNGstate& state);
+
+
+
+//|MARK: Seed State
+
+// Seeds an RNGstate struct using a true random number generator (`RDSEED`) paired with `splitmix64`.
 void seed_state(RNGstate& state);
 
 

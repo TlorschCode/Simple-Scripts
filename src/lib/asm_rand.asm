@@ -29,62 +29,143 @@
 %endmacro
 
 section .data
-    invalid_inputs_msg: DB "Invalid argument(s). Arg min cannot be greater than arg max for RNG range specification.",0
+    invalid_inputs_msg: DB "Invalid argument(s). Arg min cannot be greater than arg max for RNG range specification. Min: ",0
+    overflow_msg: DB "OVERFLOW. no_overflow label in asm_rand.asm was reached",0
+
 
 
 section .text
 
-extern _throw_logic_error
+extern _throw_bad_arg_error
 
 
+
+;| MARK: Gen Norm
+global gen_urandint
+gen_urandint: ; arg1 is RNGstate, arg2 is min, arg3 is max
+    ; RESERVED: r10, r11 (for gen_rand64)
+    CMP arg2,arg3
+    JG call_bad_arg_order
+    JE ret_min
+
+    PUSH rbx ; allow rbx for usage
+    PUSH rdi ; allow rdi for usage
+    PUSH rsi ; allow rsi for usage
+    MOV rbx,rdx ; save rdx
+
+    ;| Seed Biasless
+    ; range = max - min + 1;
+    SUB r8,rdx
+    ADD r8,1 ; r8 → range
+    MOV rdi,r8 ; rdi → range
+    ; threshold = (-range) % range
+    ; UNAVAILABLE: rcx, rdi
+    ; AVAILABLE: rax, rdx, r8, r9
+
+    MOV rax,rdi
+    NEG rax ; (-range)
+    XOR rdx,rdx
+    DIV rdi ; (-range) % range, rdx → remainder
+    MOV rsi,rdx
+    ; rdx → threshold
+    ; AVAILABLE: rax, r8, r9
+
+    .retry_rand:
+        MOV rdx,rbx
+        CALL gen_rand64
+        MOV rdx,rax
+        MULX rax, r8, rsi ; rax → rax * rdi (range), hi → rax, low → r8
+        CMP r8,rdi
+        JL .retry_rand
+    ADD rax,rbx
+    POP rsi
+    POP rdi
+    POP rbx
+    ret
+
+    ; FORMULA:
+    ; uint64_t bounded_rand(uint64_t range) {
+    ;     uint64_t threshold = (-range) % range; // precompute
+
+    ;     while (1) {
+    ;         uint64_t x = rng();           // 64-bit random
+    ;         128bit prod = (128bit)x * range;
+    ;         uint64_t hi = prod >> 64;
+    ;         uint64_t lo = (uint64_t)prod; // low 64 bits
+    ;         if (lo >= threshold)
+    ;             return hi;                // result in [0, range]
+    ;         // else repeat
+    ;     }
+    ; }
+    
+global gen_urandintHQ
+gen_urandintHQ: ; rcx is an RNGstate struct, rdx is min, and r8 is max
+    ; RESERVED: r10, r11 (for gen_rand64)
+    CMP arg2,arg3
+    JG call_bad_arg_order
+    JE ret_min
+
+    PUSH rbx ; allow rbx for usage
+    PUSH rdi ; allow rdi for usage
+    PUSH rsi ; allow rsi for usage
+    MOV rbx,rdx ; save rdx
+
+    ;| Seed Biasless
+    ; range = max - min + 1;
+    SUB r8,rdx
+    ADD r8,1 ; r8 → range
+    MOV rdi,r8 ; rdi → range
+    ; threshold = (-range) % range
+    ; UNAVAILABLE: rcx, rdi
+    ; AVAILABLE: rax, rdx, r8, r9
+
+    MOV rax,rdi
+    NEG rax ; (-range)
+    XOR rdx,rdx
+    DIV rdi ; (-range) % range, rdx → remainder
+    MOV rsi,rdx
+    ; rdx → threshold
+    ; AVAILABLE: rax, r8, r9
+
+    .retry_rand:
+        MOV rdx,rbx
+        CALL gen_rand64HQ
+        MOV rdx,rax
+        MULX rax, r8, rsi ; rax → rax * rdi (range), hi → rax, low → r8
+        CMP r8,rdi
+        JL .retry_rand
+    ADD rax,rbx
+    POP rsi
+    POP rdi
+    POP rbx
+    ret
+
+    ; FORMULA:
+    ; uint64_t bounded_rand(uint64_t range) {
+    ;     uint64_t threshold = (-range) % range; // precompute
+
+    ;     while (1) {
+    ;         uint64_t x = rng();           // 64-bit random
+    ;         128bit prod = (128bit)x * range;
+    ;         uint64_t hi = prod >> 64;
+    ;         uint64_t lo = (uint64_t)prod; // low 64 bits
+    ;         if (lo >= threshold)
+    ;             return hi;                // result in [0, range]
+    ;         // else repeat
+    ;     }
+    ; }
 
 global gen_seed
 gen_seed:
     CMP arg1,arg2
-    JA .call_bad_arg_order
-    JE .ret_min
-    
-    ;| Make Seed
-    .seed__try_seed:
-        RDSEED rax ; MULX uses rdx instead of rax
-        JNC .seed__try_seed ; carry flag is clear, so it did not succeed
-    MOV rdx,arg2 ; rbx = max
-    SUB rdx,arg1 ; rbx = max - min
-    MULX rax,rdx,rax ; low 64 bits go into rdx, high 64 bits go into rax (since multiplying two 64 bit unsigned ints together could result in 128 bits needed of total storage)
-    ; this results in basically no bias (1 / (2^64) of bias, or ~0.00000000000000000005...)
-    ADD rax,arg1 ; add min to shift into min max range
-    ret
-
-    .call_bad_arg_order:
-        CALL err__bad_arg_order
-        ret
-    .ret_min:
-        MOV rax,[arg1]
-        ret
-
-global gen_seed64
-gen_seed64:
-    seed64__try_seed:
-        RDSEED rax
-        JNC seed64__try_seed ; carry flag is clear, so it did not succeed
-    ret
-
-
-global gen_seed_biasless
-gen_seed_biasless:
-    CMP arg1,arg2
-    JA .call_bad_arg_order
-    JE .ret_min
+    JG call_bad_arg_order
+    JE ret_min
 
     ;| Seed Biasless
-    ; TODO
-    ; FIXME: Finish
-    %define x rax
     ; range = max - min + 1;
     SUB arg2,arg1
     ADD rdx,1 ; rdx now holds range
-    ; save min for later (add to rax at end)
-    MOV r9,arg1
+    MOV r9,arg1 ; save min for later (add to rax at end)
     ; threshold = (-range) % range
     MOV rax,rdx ; rax now stores range
     MOV rcx,rdx ; rcx now stores range as well
@@ -100,9 +181,9 @@ gen_seed_biasless:
         .try_seed:
             RDSEED rdx
             JNC .try_seed ; retry if it failed
-        MULX rax, r8, rcx ; rax is hi, r8 is low
+        MULX rax, r8, rax ; rax is hi, r8 is low
         CMP r8,r10
-        JB .regen_seed ; if not low >= threshold, then retry, otherwise continue to the `ret` below
+        JL .regen_seed ; if not low >= threshold, then retry, otherwise continue to the `ret` below
     ADD rax,r9
     ret
 
@@ -120,66 +201,104 @@ gen_seed_biasless:
     ;         // else repeat
     ;     }
     ; }
-    ; Extras
-    .call_bad_arg_order:
-        CALL err__bad_arg_order
-        ret
-    .ret_min:
-        MOV rax,[arg1]
-        ret
 
 
-global gen_randint
-gen_randint: ; arg1 is RNGstate, arg2 is min, arg3 is max
-    CMP arg2,arg3
-    JA .call_bad_arg_order
 
-    MOV r15,arg2 ; store min in r15 so it doesn't get overwritten
-    CALL gen_rand64
-    SUB arg3,arg2
-    ADD arg3,1  ; for unsigned purposes
-    MOV rdx,arg3 ; for MULX
-    MULX rax,arg3,rax
-    ADD rax,r15 ; add min
+;| MARK: Gen 64
+global gen_seed64
+gen_seed64:
+    .try_seed:
+        RDSEED rax
+        JNC .try_seed ; carry flag is clear, so it did not succeed
     ret
 
-    .call_bad_arg_order:
-        CALL err__bad_arg_order
-        ret
-    JE .ret_min
-    .ret_min:
-        MOV rax,arg2
-        ret
+global gen_rand64
+gen_rand64:
+    ; result = rotl(s0 + s1, 17) + s0;
+    MOV rax,state0
+    ADD rax,state1
+    ROL rax,17
+    ADD rax,state0 ; now rax holds `result`
+    
+    MOV r10,state0
+    MOV r11,state1
+
+    ; s1 ^= s0;
+    XOR r11,r10
+    ; s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+    ROL r10,49
+    XOR r10,state1
+    MOV r8,state1
+    SHL r8,21
+    XOR r10,r8
+
+    ; s1 = rotl(s1, 28);
+    ROL r11,28
+
+    MOV state0,r10
+    MOV state1,r11
 
 
-global asm_randint_biasless
-asm_randint_biasless:
+    ret
 
-    ; TODO: Create biasless randint generation
     ; FORMULA:
-    ; uint64_t bounded_rand(uint64_t range) {
-    ;     uint64_t threshold = (uint64_t)(-range) % range; // precompute
-
-    ;     while (1) {
-    ;         uint64_t x = rng();           // 64-bit random
-    ;         unsigned __int128 prod = (unsigned __int128)x * range;
-    ;         uint64_t hi = prod >> 64;
-    ;         uint64_t lo = (uint64_t)prod; // low 64 bits
-    ;         if (lo >= threshold)
-    ;             return hi;                // result in [0, range)
-    ;         // else repeat
-    ;     }
+    ; uint64_t xoroshiro128plusplus() {
+    ;     uint64_t result = rotl(s0 + s1, 17) + s0;
+    ;     s1 ^= s0;
+    ;     s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+    ;     s1 = rotl(s1, 28);
+        
+    ;     return result;
     ; }
 
 
-; VERIFIED
+global gen_rand64HQ
+gen_rand64HQ:
+    ; result = rotl(s0 * 5, 7) * 9;
+    MOV rax,state0
+    IMUL rax,rax,5
+    ROL rax,7
+    IMUL rax,rax,9
+
+    MOV r10,state0
+    MOV r11,state1
+    
+    ; s1 ^= s0;
+    XOR r11,r10
+    ; s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+    ROL r10,49
+    XOR r10,r11
+    MOV r8,r11
+    SHL r8,21
+    XOR r10,r8
+
+    ; s1 = rotl(s1, 28);
+    ROL r11,28
+
+    MOV state0,r10
+    MOV state1,r11
+
+    ret
+    ; FORMULA:
+    ; uint64_t xoroshiro128starstar() {
+    ;     uint64_t result = rotl(s0 * 5, 7) * 9;
+    ;     s1 ^= s0;
+    ;     s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+    ;     s1 = rotl(s1, 28);
+        
+    ;     return result;
+    ; }
+
+
+
+;| MARK: Seed State
 global seed_state
 seed_state:
     CALL gen_seed64
     MOV qword state0,rax ; populate state0
    
    
-    ;| SPLITMIX64
+    ;# SPLITMIX64
     ADD rax,0x9E3779B97F4A7C15 ; seed += 0x9E3779B97F4A7C15
 
     ; z = (z XOR (z >> 30)) * 0xBF58476D1CE4E5B9
@@ -204,49 +323,31 @@ seed_state:
     ;     z = (z XOR (z >> 30)) * 0xBF58476D1CE4E5B9
     ;     z = (z XOR (z >> 27)) * 0x94D049BB133111EB
     ;     return z XOR (z >> 31)
-    ;| END SPLITMIX64
+    ;# END SPLITMIX64
 
 
     MOV qword state1,rax ; populate state1. 8 Bytes ahead, since arg1 is a struct containing two uint64's
     ret
 
 
-; TODO: Replace xiroshiro+ algorithm (biased) with xiroshrio++ algorithm (unbiased)
-; VERIFIED (99%)
-global gen_rand64
-    gen_rand64:
-        ; result = rotl(s0 + s1, 17) + s0;
-        MOV rax,state0
-        ADD rax,state1
-        ROL rax,17
-        ADD rax,state0 ; now rax holds `result`
-        
-        ; s1 ^= s0;
-        XOR state1,state0
-        ; s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
-        ROL state0,49
-        XOR state0,state1
-        MOV r8,state1
-        SHL r8,21
-        XOR state0,r8
 
-        ; s1 = rotl(s1, 28);
-        ROL state1,28
 
-        ret
 
-        ;# FORMULA:
-        ; uint64_t xoroshiro128plusplus() {
-        ;     uint64_t result = rotl(s0 + s1, 17) + s0;
-        ;     s1 ^= s0;
-        ;     s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
-        ;     s1 = rotl(s1, 28);
-            
-        ;     return result;
-        ; }
+;| MARK: Err
+call_bad_arg_order:
+    CALL err__bad_arg_order
+    ret
+ret_min:
+    MOV rax,arg2
+    ret
 
+no_overflow: ; this code should never be reached. If it is, then something has gone wrong
+    LEA rcx,[rel overflow_msg]
+    CALL _throw_bad_arg_error
+    ret
 
 err__bad_arg_order:
     LEA rcx,[rel invalid_inputs_msg]
-    CALL _throw_logic_error
+    MOV r9,rax
+    CALL _throw_bad_arg_error
     ret
