@@ -79,30 +79,44 @@ gen_seed_biasless:
     ;| Seed Biasless
     ; TODO
     ; FIXME: Finish
+    %define x rax
     ; range = max - min + 1;
-    ADD arg1,1
-    SUB arg2,arg1 ; rdx now holds range
-    MOV r15,arg2
-    XOR rax,rax ; clear rax
-    MOV rdx,1 ; higher half of rax, now rax is 2^64 or something
-    DIV r15
-
-
-    ; threshold = (pow(2, 64)) % range
-    
+    SUB arg2,arg1
+    ADD rdx,1 ; rdx now holds range
+    ; save min for later (add to rax at end)
+    MOV r9,arg1
+    ; threshold = (-range) % range
+    MOV rax,rdx ; rax now stores range
+    MOV rcx,rdx ; rcx now stores range as well
+    NEG rax ; (-range)
+    XOR rdx,rdx ; clear higher 64 bits after rax
+    DIV rcx ; now rdx stores the remainder of (-range) / range
+    MOV r10,rdx ; now r10 holds threshold
+    ; at this point, rcx stores range,
+    ;                r10 stores threshold, and
+    ;                rax and rdx are expendable
+    ; gen seed
+    .regen_seed:
+        .try_seed:
+            RDSEED rdx
+            JNC .try_seed ; retry if it failed
+        MULX rax, r8, rcx ; rax is hi, r8 is low
+        CMP r8,r10
+        JB .regen_seed ; if not low >= threshold, then retry, otherwise continue to the `ret` below
+    ADD rax,r9
     ret
 
     ; FORMULA:
     ; uint64_t bounded_rand(uint64_t range) {
-    ;     uint64_t threshold = (pow(2, 64)) % range; // precompute
+    ;     uint64_t threshold = (-range) % range; // precompute
 
     ;     while (1) {
     ;         uint64_t x = rng();           // 64-bit random
-    ;         unsigned __int128 prod = (unsigned __int128)x * range;
+    ;         128bit prod = (128bit)x * range;
     ;         uint64_t hi = prod >> 64;
     ;         uint64_t lo = (uint64_t)prod; // low 64 bits
     ;         if (lo >= threshold)
-    ;             return hi;                // result in [0, range)
+    ;             return hi;                // result in [0, range]
     ;         // else repeat
     ;     }
     ; }
@@ -121,7 +135,7 @@ gen_randint: ; arg1 is RNGstate, arg2 is min, arg3 is max
     JA .call_bad_arg_order
 
     MOV r15,arg2 ; store min in r15 so it doesn't get overwritten
-    CALL asm_gen_rand64
+    CALL gen_rand64
     SUB arg3,arg2
     ADD arg3,1  ; for unsigned purposes
     MOV rdx,arg3 ; for MULX
@@ -161,7 +175,7 @@ asm_randint_biasless:
 ; VERIFIED
 global asm_seed_state
 asm_seed_state:
-    CALL asm_gen_seed64
+    CALL gen_seed64
     MOV qword state0,rax ; populate state0
    
    
@@ -203,8 +217,8 @@ splitmix64:
 
 
 ; VERIFIED (99%)
-global asm_gen_rand64
-asm_gen_rand64:
+global gen_rand64
+gen_rand64:
     MOV rax, qword state0
     ADD rax, qword state1 ; result = state0 + state1
 
