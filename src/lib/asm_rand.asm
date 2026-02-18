@@ -173,8 +173,8 @@ asm_randint_biasless:
 
 
 ; VERIFIED
-global asm_seed_state
-asm_seed_state:
+global seed_state
+seed_state:
     CALL gen_seed64
     MOV qword state0,rax ; populate state0
    
@@ -211,51 +211,39 @@ asm_seed_state:
     ret
 
 
-; VERIFIED
-splitmix64:
-    
-
-
+; TODO: Replace xiroshiro+ algorithm (biased) with xiroshrio++ algorithm (unbiased)
 ; VERIFIED (99%)
 global gen_rand64
-gen_rand64:
-    MOV rax, qword state0
-    ADD rax, qword state1 ; result = state0 + state1
+    gen_rand64:
+        ; result = rotl(s0 + s1, 17) + s0;
+        MOV rax,state0
+        ADD rax,state1
+        ROL rax,17
+        ADD rax,state0 ; now rax holds `result`
+        
+        ; s1 ^= s0;
+        XOR state1,state0
+        ; s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+        ROL state0,49
+        XOR state0,state1
+        MOV r8,state1
+        SHL r8,21
+        XOR state0,r8
 
+        ; s1 = rotl(s1, 28);
+        ROL state1,28
 
-    MOV r10, qword state0 ; cannot xor [state1] wih [state0] in one instruction
-    XOR qword state1,r10 ; state1 ^= state0
+        ret
 
-
-    ; state0 = rotl(state0, 55) ^ state1 ^ (state1 << 14)
-    MOV r10, qword state1
-    SHL r10,14 ; (state1 << 14)
-
-    ; rotleft
-    MOV r11, qword state0 ; value to rotate
-    ROL r11,55 ; rotl(state0, 55)
-
-    XOR r11, qword state1 ;  rotl(state0, 55) ^ state1
-    XOR r11,r10      ; (rotl(state0, 55) ^ state1) ^ (state1 << 14)
-    MOV qword state0,r11 ; state0 = ...
-
-
-    ; state1 = rotl(state1, 36)
-    MOV r11, qword state1 ; value to rotate
-    ROL r11, 36
-
-    MOV qword state1,r11
-    ret ; rax has stayed persistent and is still a valid return value
-    ; FORMULA:
-    ;     uint64_t result = state0 + state1;       // output value
-
-    ;     state1 ^= state0;                         // xor the two states
-
-    ;     state0 = rotl(state0, 55) ^ state1 ^ (state1 << 14);  // rotate and mix
-    ;     state1 = rotl(state1, 36);           // rotate
-
-    ;     return result;
-    ; }
+        ;# FORMULA:
+        ; uint64_t xoroshiro128plusplus() {
+        ;     uint64_t result = rotl(s0 + s1, 17) + s0;
+        ;     s1 ^= s0;
+        ;     s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
+        ;     s1 = rotl(s1, 28);
+            
+        ;     return result;
+        ; }
 
 
 err__bad_arg_order:
