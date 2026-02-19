@@ -74,8 +74,8 @@ gen_urandint: ; arg1 is RNGstate, arg2 is min, arg3 is max
         MOV rdx,rbx
         CALL gen_rand64
         MOV rdx,rax
-        MULX rax, r8, rsi ; rax → rax * rdi (range), hi → rax, low → r8
-        CMP r8,rdi
+        MULX rax, r8, rdi ; rax → rax * rdi (range), hi → rax, low → r8
+        CMP r8,rsi
         JL .retry_rand
     ADD rax,rbx
     POP rsi
@@ -131,8 +131,8 @@ gen_urandintHQ: ; rcx is an RNGstate struct, rdx is min, and r8 is max
         MOV rdx,rbx
         CALL gen_rand64HQ
         MOV rdx,rax
-        MULX rax, r8, rsi ; rax → rax * rdi (range), hi → rax, low → r8
-        CMP r8,rdi
+        MULX rax, r8, rdi ; rax → rax * rdi (range), hi → rax, low → r8
+        CMP r8,rsi
         JL .retry_rand
     ADD rax,rbx
     POP rsi
@@ -181,7 +181,7 @@ gen_seed:
         .try_seed:
             RDSEED rdx
             JNC .try_seed ; retry if it failed
-        MULX rax, r8, rax ; rax is hi, r8 is low
+        MULX rax, r8, rcx ; rax is hi, r8 is low
         CMP r8,r10
         JL .regen_seed ; if not low >= threshold, then retry, otherwise continue to the `ret` below
     ADD rax,r9
@@ -227,8 +227,8 @@ gen_rand64:
     XOR r11,r10
     ; s0 = rotl(s0, 49) ^ s1 ^ (s1 << 21);
     ROL r10,49
-    XOR r10,state1
-    MOV r8,state1
+    XOR r10,r11
+    MOV r8,r11
     SHL r8,21
     XOR r10,r8
 
